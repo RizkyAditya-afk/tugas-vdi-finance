@@ -6,12 +6,37 @@ import streamlit as st
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 
-# Konfigurasi Halaman Streamlit
 st.set_page_config(page_title="Dashboard Analisis Keuangan Multi-DBMS", layout="wide")
 
 load_dotenv()
 
-# Fungsi untuk mengambil data dari Cloud PostgreSQL (DBMS 1)
+# Otomatisasi generate SQLite jika belum ada di cloud
+def init_sqlite_db():
+    os.makedirs("database", exist_ok=True)
+    db_path = "database/master_data.db"
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS master_kategori (
+        id_kategori INTEGER PRIMARY KEY,
+        nama_kategori TEXT NOT NULL,
+        alokasi_anggaran REAL NOT NULL
+    )
+    ''')
+    data = [
+        (1, 'Gaji & Pendapatan', 0.0),
+        (2, 'Makanan & Minuman', 1000000.0),
+        (3, 'Tagihan & Langganan', 300000.0),
+        (4, 'Akomodasi & Tempat Tinggal', 1000000.0),
+        (5, 'Pendapatan Lain-lain', 0.0)
+    ]
+    cursor.executemany('INSERT OR REPLACE INTO master_kategori VALUES (?, ?, ?)', data)
+    conn.commit()
+    conn.close()
+
+# Inisialisasi SQLite saat app berjalan
+init_sqlite_db()
+
 def get_data_postgresql():
     db_url = os.getenv("DATABASE_URL")
     if not db_url and "DATABASE_URL" in st.secrets:
@@ -21,7 +46,6 @@ def get_data_postgresql():
     query = "SELECT * FROM transaksi_keuangan;"
     return pd.read_sql(query, engine)
 
-# Fungsi untuk mengambil data dari SQLite Lokal (DBMS 2)
 def get_data_sqlite():
     conn = sqlite3.connect("database/master_data.db")
     query = "SELECT * FROM master_kategori;"
@@ -29,24 +53,19 @@ def get_data_sqlite():
     conn.close()
     return df
 
-# Judul Utama
 st.title("💰 Dashboard Personal Finance & Budgeting")
 st.caption("Integrasi Pipeline Data Multi-DBMS: Supabase (PostgreSQL) + Local SQLite")
 
 try:
-    # 1. Pipeline Data & Federation (Penggabungan di Python)
-    df_transaksi = get_data_postgresql() # DBMS 1
-    df_kategori = get_data_sqlite()     # DBMS 2
+    df_transaksi = get_data_postgresql()
+    df_kategori = get_data_sqlite()
     
-    # Penggabungan (Merge / Join)
     df_merged = pd.merge(df_transaksi, df_kategori, on="id_kategori", how="left")
     
-    # Hitung Rekapitulasi Metrik
     total_pemasukan = df_merged[df_merged['tipe'] == 'Pemasukan']['jumlah'].sum()
     total_pengeluaran = df_merged[df_merged['tipe'] == 'Pengeluaran']['jumlah'].sum()
     sisa_saldo = total_pemasukan - total_pengeluaran
 
-    # Display Metrics
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Pemasukan", f"Rp {total_pemasukan:,.0f}")
     col2.metric("Total Pengeluaran", f"Rp {total_pengeluaran:,.0f}")
@@ -54,7 +73,6 @@ try:
 
     st.markdown("---")
 
-    # Visualisasi 1: Pengeluaran Per Kategori vs Alokasi Anggaran
     st.subheader("📊 Analisis Pengeluaran vs Batas Anggaran")
     df_pengeluaran = df_merged[df_merged['tipe'] == 'Pengeluaran'].groupby('nama_kategori').agg({
         'jumlah': 'sum',
@@ -71,7 +89,6 @@ try:
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # Tabel Data Gabungan
     st.subheader("📋 Data Terintegrasi (Data Federation)")
     st.dataframe(df_merged[['id_transaksi', 'tanggal', 'keterangan', 'nama_kategori', 'tipe', 'jumlah', 'alokasi_anggaran']], use_container_width=True)
 
